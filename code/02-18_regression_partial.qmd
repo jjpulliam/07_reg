@@ -52,7 +52,8 @@ Here is where we load the packages we will use.
 #| message: false
 #| warning: false
 
-#install.packages("nlraa")
+install.packages("nlraa")
+install.packages("metrica")
 
 # Loading packages
 library(tidyverse) # for data wrangling and plotting
@@ -70,7 +71,9 @@ library(metrica) # for rmse
 Reading data and doing some light wrangling.  
 ```{r}
 #| message: false
-reg_dfw 
+reg_dfw <- read_csv("../data/reg.csv") %>%
+  clean_names() %>%
+  mutate(rep = factor(rep))
 
 reg_dfw
 ```
@@ -94,7 +97,13 @@ summary(reg_dfw)
 Yield ranging from 7.8 to 15.6 Mg/ha.  
 
 ```{r reg exp boxplot}
+ggplot(data = reg_dfw,
+       aes(x = sr_ksha,
+           y = yield_mgha)) +
+  geom_boxplot()
 
+
+#treatments are not being considered as a factor and is numerical here so that is why it showing one huge boxplot. Seeding rate is being treated as numerical.
 ```
 
 What is going on with this boxplot?
@@ -102,8 +111,12 @@ What is going on with this boxplot?
 ```{r reg plot point + smooth}
 ggplot(reg_dfw, 
        aes(x = sr_ksha, 
-           y = yield_mgha))
+           y = yield_mgha)) +
+  geom_point() +
+  geom_smooth()
 
+# we want to see this and fit a regresssion through
+#this looks like quadratic will be the best 
 ```
 
 Let's fit 4 different models to assess which one fits the data the best. 
@@ -117,7 +130,8 @@ Our goal is to then use that model to estimate the optimum seeding rate for this
 options(contrasts = c("contr.sum", "contr.poly"))
 
 # Model fitting
-mod1_int 
+mod1_int <- lmer(yield_mgha ~ (1|rep),
+                 data =  reg_dfw)
 
 # Summary
 summary(mod1_int)
@@ -135,7 +149,11 @@ mod1_int_aug <- augment(mod1_int) %>%
 
 
 mod1_int_aug
+
+#scaled residuals is to test for outliers. 
+#left join to bring seeding rate back in table 
 ```
+
 
 ### Within-group errors are iid ~ N(0, var2)
 
@@ -181,6 +199,8 @@ Few observations, nothing alarming.
 
 ```{r mod1 ANOVA}
 summary(mod1_int)
+
+#interept is highly significant, but that does not mean you are running the best model.
 ```
 
 Intercept highly significant!
@@ -192,7 +212,10 @@ ggplot(mod1_int_aug,
        aes(x = sr_ksha, 
            y = yield_mgha))+
   geom_point(size = 3, 
-             alpha = .7)
+             alpha = .7) +
+  geom_line(aes(y = .fixed))
+
+#now we can see the line being fitted to the data... it is not great. Our model is underspecifing. 
 ```
 
 Problem with the plot above:  
@@ -203,14 +226,17 @@ Solution:
 
 First, let's create an data set with all levels of seeding rate we want to get a prediction.  
 ```{r nd}
-nd 
+nd <- data.frame(sr_ksha = seq(40, 120, 1 ))
 
 nd
 ```
 
 ```{r mod1 better final plot}
 # Creating predictions
-nd 
+nd <- nd %>% 
+  mutate(mod1_yield_mgha = predict(mod1_int,
+                                   nd, 
+                                   re.form = NA))
 # Creating function to bootstrap
 predict.fun <- function(mod) {
   predict(mod, 
@@ -242,7 +268,14 @@ ggplot(reg_dfw,
              alpha = .7)+
   geom_line(data = nd, 
             aes(y = mod1_yield_mgha), 
-            color = "forestgreen")
+            color = "forestgreen") +
+  
+  geom_ribbon(data = nd,
+              aes(ymin = mod1_int_lcl,
+                  ymax = mod1_int_upl,
+                  x = sr_ksha),
+              inherit.aes = FALSE,
+              alpha = 0.5)
 ```
 
 Linear thoughts:
@@ -259,7 +292,8 @@ Next, let's try a linear (intercept + slope) model.
 options(contrasts = c("contr.sum", "contr.poly"))
 
 # Model fitting
-mod2_lin 
+mod2_lin <- lmer(yield_mgha ~ (1|rep) + sr_ksha,
+                 data = reg_dfw)
 
 # Summary
 summary(mod2_lin)
@@ -331,7 +365,9 @@ ggplot(mod2_lin_aug,
        aes(x = sr_ksha, 
            y = yield_mgha))+
   geom_point(size = 3, 
-             alpha = .7)
+             alpha = .7) +
+  geom_line(aes(y = .fixed)) +
+  scale_x_continuous(limits = c(0,120))
 ```
 
 Problem with the plot above:  
